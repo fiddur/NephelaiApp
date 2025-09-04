@@ -1,7 +1,22 @@
+import java.util.Properties
+import java.io.FileInputStream
+import java.io.File // Assuming this was added to fix the previous 'Unresolved reference: io'
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22"
+}
+
+// Function to load properties from local.properties
+fun getLocalProperty(key: String, projectRootDir: File): String { // Assuming changed to File
+    val properties = Properties()
+    val localPropertiesFile = File(projectRootDir, "local.properties") // Assuming changed to File
+    if (localPropertiesFile.exists()) {
+        FileInputStream(localPropertiesFile).use { stream -> properties.load(stream) } // Changed lambda parameter
+    }
+    return properties.getProperty(key) ?: ""
 }
 
 android {
@@ -16,6 +31,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val nepheliaiApiToken = getLocalProperty("nepheliaiApiToken", rootDir)
+        buildConfigField("String", "NEPHELIAI_API_TOKEN", "\"$nepheliaiApiToken\"")
     }
 
     buildTypes {
@@ -25,6 +43,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val nepheliaiApiToken = getLocalProperty("nepheliaiApiToken", rootDir)
+            buildConfigField("String", "NEPHELIAI_API_TOKEN", "\"$nepheliaiApiToken\"")
+        }
+        debug {
+            // BuildConfig fields are often defined per build type, or in defaultConfig for all
         }
     }
     compileOptions {
@@ -36,11 +59,16 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    packagingOptions { 
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
     }
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -50,6 +78,13 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation("androidx.health.connect:connect-client:1.2.0-alpha01")
+
+    implementation("io.ktor:ktor-client-android:2.3.8")
+    implementation("io.ktor:ktor-client-content-negotiation:2.3.8")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.8")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
