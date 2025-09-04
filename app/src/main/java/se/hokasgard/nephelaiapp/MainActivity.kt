@@ -9,6 +9,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,12 +27,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
-import kotlinx.coroutines.MainScope
+import androidx.health.connect.client.request.ReadRecordsRequest
+import androidx.health.connect.client.time.TimeRangeFilter
 import kotlinx.coroutines.launch
 import se.hokasgard.nephelaiapp.ui.theme.NephelaiAppTheme
+import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,21 +60,17 @@ fun HealthConnectScreen() {
     val context = LocalContext.current
     val healthConnectClient = remember { HealthConnectClient.getOrCreate(context) }
     var hasPermissions by remember { mutableStateOf(false) }
+    var hrvRecords by remember { mutableStateOf<List<HeartRateVariabilityRmssdRecord>>(emptyList()) }
 
-    // Remember a coroutine scope
     val scope = rememberCoroutineScope()
 
-    // 1. Define the set of permissions you want to request
     val permissions = setOf(
         HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)
     )
 
-    // 2. Create a launcher to request permissions.
-    // This launcher handles the result of the permission request.
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissionsMap ->
-        // After the user responds, check if all requested permissions were granted
         if (permissionsMap.values.all { it }) {
             Log.d("HealthConnect", "All permissions granted")
             hasPermissions = true
@@ -76,7 +80,6 @@ fun HealthConnectScreen() {
         }
     }
 
-    // 3. A function to check permissions and launch the request if needed
     suspend fun checkAndRequestPermissions() {
         val granted = healthConnectClient.permissionController.getGrantedPermissions()
         if (granted.containsAll(permissions)) {
@@ -88,28 +91,68 @@ fun HealthConnectScreen() {
         }
     }
 
-    // This runs once when the screen is first displayed
+    suspend fun readHrvRecords() {
+        if (hasPermissions) {
+            try {
+                val sevenDaysAgo = ZonedDateTime.now().minusDays(7).toInstant()
+                val now = Instant.now()
+                val request = ReadRecordsRequest(
+                    recordType = HeartRateVariabilityRmssdRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(sevenDaysAgo, now),
+                    ascendingOrder = false // Latest records first
+                )
+                val response = healthConnectClient.readRecords(request)
+                hrvRecords = response.records
+                Log.d("HealthConnect", "HRV records read: ${hrvRecords.size}")
+            } catch (e: Exception) {
+                Log.e("HealthConnect", "Error reading HRV records", e)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         checkAndRequestPermissions()
     }
 
-    // 4. The UI for your screen
+    LaunchedEffect(hasPermissions) {
+        if (hasPermissions) {
+            readHrvRecords()
+        }
+    }
+
     Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             if (hasPermissions) "✅ Permissions Granted for HRV" else "❌ Permissions Not Granted for HRV"
         )
         Button(
-            // The button will re-check and ask for permissions if they are missing
             onClick = {
-                // We need to launch this in a coroutine scope
-                scope.launch { checkAndRequestPermissions() }
+                scope.launch {
+                    checkAndRequestPermissions()
+                    // If permissions are granted after click, attempt to read records
+                    if (hasPermissions) {
+                        readHrvRecords()
+                    }
+                }
             }
         ) {
-            Text("Check / Request Permissions")
+            Text(if (hasPermissions) "Refresh HRV Data" else "Check / Request Permissions")
+        }
+
+        if (hrvRecords.isNotEmpty()) {
+            Text("Latest HRV Records (last 7 days):")
+            LazyColumn {
+                items(hrvRecords) { record ->
+                    Text("Time: ${record.time}, HRV: ${record.heartRateVariabilityMillis} ms")
+                }
+            }
+        } else if (hasPermissions) {
+            Text("No HRV records found for the last 7 days.")
         }
     }
 }
