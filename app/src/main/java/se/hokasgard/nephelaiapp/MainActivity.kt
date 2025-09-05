@@ -213,6 +213,38 @@ fun HealthConnectScreen() {
                         val serializableData = SpeedRecordSerializable.fromRecordsList(classRecords)
                         handlePostData(serializableData, SpeedRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
+                    ActiveCaloriesBurnedRecord::class -> {
+                        val serializableData = ActiveCaloriesBurnedRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, ActiveCaloriesBurnedRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    TotalCaloriesBurnedRecord::class -> {
+                        val serializableData = TotalCaloriesBurnedRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, TotalCaloriesBurnedRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    PowerRecord::class -> {
+                        val serializableData = PowerRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, PowerRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    NutritionRecord::class -> {
+                        val serializableData = NutritionRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, NutritionRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    LeanBodyMassRecord::class -> {
+                        val serializableData = LeanBodyMassRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, LeanBodyMassRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    BodyFatRecord::class -> {
+                        val serializableData = BodyFatRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, BodyFatRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    SleepSessionRecord::class -> {
+                        val serializableData = SleepSessionRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, SleepSessionRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
+                    BoneMassRecord::class -> {
+                        val serializableData = BoneMassRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, BoneMassRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
+                    }
                     else -> {
                         Log.w("SendData", "No specific serialization (aligned with react-native-health-connect) implemented for $recordTypeSimpleName. Skipping.")
                     }
@@ -290,6 +322,30 @@ fun HealthConnectScreen() {
                         }
                         is HeartRateRecord -> {
                              Text("HeartRate: ${record.samples.size} samples, first ${record.samples.firstOrNull()?.beatsPerMinute ?: "N/A"}bpm (${record.startTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is ActiveCaloriesBurnedRecord -> {
+                            Text("Active Cals: ${String.format("%.2f", record.energy.inKilocalories)} kcal (${record.startTime.toIsoString()} - ${record.endTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is TotalCaloriesBurnedRecord -> {
+                            Text("Total Cals: ${String.format("%.2f", record.energy.inKilocalories)} kcal (${record.startTime.toIsoString()} - ${record.endTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is PowerRecord -> {
+                            Text("Power: ${record.samples.size} samples, first ${String.format("%.2f", record.samples.firstOrNull()?.power?.inWatts ?: 0.0)}W (${record.startTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is NutritionRecord -> {
+                            Text("Nutrition: ${record.name ?: "Unnamed food"} (${record.mealType}, ${String.format("%.0f",record.energy?.inKilocalories ?: 0.0)} kcal), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is LeanBodyMassRecord -> {
+                            Text("Lean Body Mass: ${String.format("%.2f", record.mass.inKilograms)} kg at ${record.time.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is BodyFatRecord -> {
+                            Text("Body Fat: ${String.format("%.1f", record.percentage.value)}%% at ${record.time.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is SleepSessionRecord -> {
+                            Text("Sleep: ${record.title ?: "Session"} (${record.startTime.toIsoString()} - ${record.endTime.toIsoString()}), Stages: ${record.stages.size}, ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is BoneMassRecord -> {
+                            Text("Bone Mass: ${String.format("%.2f", record.mass.inKilograms)} kg at ${record.time.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
                         }
                         else -> {
                             Text("${record::class.simpleName}: ID: ${record.metadata.id.substring(0,8)} at ${record.metadata.lastModifiedTime.toIsoString()}")

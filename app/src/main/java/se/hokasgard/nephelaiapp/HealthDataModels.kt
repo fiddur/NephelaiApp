@@ -312,6 +312,291 @@ data class SpeedRecordSerializable(
     }
 }
 
+// --- Active Calories Burned Record ---
+@Serializable
+data class ActiveCaloriesBurnedRecordSerializable(
+    val startTime: String,
+    val endTime: String,
+    val energyInKilocalories: Double,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<ActiveCaloriesBurnedRecordSerializable> {
+            return classRecords.filterIsInstance<ActiveCaloriesBurnedRecord>().map { record ->
+                ActiveCaloriesBurnedRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    energyInKilocalories = record.energy.inKilocalories,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Total Calories Burned Record ---
+@Serializable
+data class TotalCaloriesBurnedRecordSerializable(
+    val startTime: String,
+    val endTime: String,
+    val energyInKilocalories: Double,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<TotalCaloriesBurnedRecordSerializable> {
+            return classRecords.filterIsInstance<TotalCaloriesBurnedRecord>().map { record ->
+                TotalCaloriesBurnedRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    energyInKilocalories = record.energy.inKilocalories,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Power Record ---
+@Serializable
+data class PowerSampleSerializable(
+    val time: String,
+    val powerInWatts: Double
+)
+
+@Serializable
+data class PowerRecordSerializable(
+    val startTime: String,
+    val endTime: String,
+    val samples: List<PowerSampleSerializable>,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<PowerRecordSerializable> {
+            return classRecords.filterIsInstance<PowerRecord>().map { record ->
+                PowerRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    samples = record.samples.map {
+                        PowerSampleSerializable(
+                            time = it.time.toIsoString(),
+                            powerInWatts = it.power.inWatts
+                        )
+                    },
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Nutrition Record ---
+@Serializable
+data class NutritionRecordSerializable(
+    val startTime: String,
+    val endTime: String,
+    val biotinInGrams: Double? = null,
+    val caffeineInGrams: Double? = null,
+    val calciumInGrams: Double? = null,
+    val energyInKilocalories: Double? = null,
+    val energyFromFatInKilocalories: Double? = null,
+    val chlorideInGrams: Double? = null,
+    val cholesterolInGrams: Double? = null,
+    val chromiumInGrams: Double? = null,
+    val copperInGrams: Double? = null,
+    val dietaryFiberInGrams: Double? = null,
+    val folateInGrams: Double? = null,
+    val folicAcidInGrams: Double? = null,
+    val iodineInGrams: Double? = null,
+    val ironInGrams: Double? = null,
+    val magnesiumInGrams: Double? = null,
+    val manganeseInGrams: Double? = null,
+    val molybdenumInGrams: Double? = null,
+    val monounsaturatedFatInGrams: Double? = null,
+    val niacinInGrams: Double? = null,
+    val pantothenicAcidInGrams: Double? = null,
+    val phosphorusInGrams: Double? = null,
+    val polyunsaturatedFatInGrams: Double? = null,
+    val potassiumInGrams: Double? = null,
+    val proteinInGrams: Double? = null,
+    val riboflavinInGrams: Double? = null,
+    val saturatedFatInGrams: Double? = null,
+    val seleniumInGrams: Double? = null,
+    val sodiumInGrams: Double? = null,
+    val sugarInGrams: Double? = null,
+    val thiaminInGrams: Double? = null,
+    val totalCarbohydrateInGrams: Double? = null,
+    val totalFatInGrams: Double? = null,
+    val transFatInGrams: Double? = null,
+    val unsaturatedFatInGrams: Double? = null,
+    val vitaminAInGrams: Double? = null,
+    val vitaminB12InGrams: Double? = null,
+    val vitaminB6InGrams: Double? = null,
+    val vitaminCInGrams: Double? = null,
+    val vitaminDInGrams: Double? = null,
+    val vitaminEInGrams: Double? = null,
+    val vitaminKInGrams: Double? = null,
+    val zincInGrams: Double? = null,
+    val mealType: Int,
+    val name: String? = null,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<NutritionRecordSerializable> {
+            return classRecords.filterIsInstance<NutritionRecord>().map { record ->
+                NutritionRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    biotinInGrams = record.biotin?.inGrams,
+                    caffeineInGrams = record.caffeine?.inGrams,
+                    calciumInGrams = record.calcium?.inGrams,
+                    energyInKilocalories = record.energy?.inKilocalories,
+                    energyFromFatInKilocalories = record.energyFromFat?.inKilocalories,
+                    chlorideInGrams = record.chloride?.inGrams,
+                    cholesterolInGrams = record.cholesterol?.inGrams,
+                    chromiumInGrams = record.chromium?.inGrams,
+                    copperInGrams = record.copper?.inGrams,
+                    dietaryFiberInGrams = record.dietaryFiber?.inGrams,
+                    folateInGrams = record.folate?.inGrams,
+                    folicAcidInGrams = record.folicAcid?.inGrams,
+                    iodineInGrams = record.iodine?.inGrams,
+                    ironInGrams = record.iron?.inGrams,
+                    magnesiumInGrams = record.magnesium?.inGrams,
+                    manganeseInGrams = record.manganese?.inGrams,
+                    molybdenumInGrams = record.molybdenum?.inGrams,
+                    monounsaturatedFatInGrams = record.monounsaturatedFat?.inGrams,
+                    niacinInGrams = record.niacin?.inGrams,
+                    pantothenicAcidInGrams = record.pantothenicAcid?.inGrams,
+                    phosphorusInGrams = record.phosphorus?.inGrams,
+                    polyunsaturatedFatInGrams = record.polyunsaturatedFat?.inGrams,
+                    potassiumInGrams = record.potassium?.inGrams,
+                    proteinInGrams = record.protein?.inGrams,
+                    riboflavinInGrams = record.riboflavin?.inGrams,
+                    saturatedFatInGrams = record.saturatedFat?.inGrams,
+                    seleniumInGrams = record.selenium?.inGrams,
+                    sodiumInGrams = record.sodium?.inGrams,
+                    sugarInGrams = record.sugar?.inGrams,
+                    thiaminInGrams = record.thiamin?.inGrams,
+                    totalCarbohydrateInGrams = record.totalCarbohydrate?.inGrams,
+                    totalFatInGrams = record.totalFat?.inGrams,
+                    transFatInGrams = record.transFat?.inGrams,
+                    unsaturatedFatInGrams = record.unsaturatedFat?.inGrams,
+                    vitaminAInGrams = record.vitaminA?.inGrams,
+                    vitaminB12InGrams = record.vitaminB12?.inGrams,
+                    vitaminB6InGrams = record.vitaminB6?.inGrams,
+                    vitaminCInGrams = record.vitaminC?.inGrams,
+                    vitaminDInGrams = record.vitaminD?.inGrams,
+                    vitaminEInGrams = record.vitaminE?.inGrams,
+                    vitaminKInGrams = record.vitaminK?.inGrams,
+                    zincInGrams = record.zinc?.inGrams,
+                    mealType = record.mealType,
+                    name = record.name,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Lean Body Mass Record ---
+@Serializable
+data class LeanBodyMassRecordSerializable(
+    val time: String,
+    val massInKilograms: Double,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<LeanBodyMassRecordSerializable> {
+            return classRecords.filterIsInstance<LeanBodyMassRecord>().map { record ->
+                LeanBodyMassRecordSerializable(
+                    time = record.time.toIsoString(),
+                    massInKilograms = record.mass.inKilograms,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Body Fat Record ---
+@Serializable
+data class BodyFatRecordSerializable(
+    val time: String,
+    val percentage: Double,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<BodyFatRecordSerializable> {
+            return classRecords.filterIsInstance<BodyFatRecord>().map { record ->
+                BodyFatRecordSerializable(
+                    time = record.time.toIsoString(),
+                    percentage = record.percentage.value, // androidx.health.connect.client.units.Percentage.value is Double
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Sleep Session Record ---
+@Serializable
+data class SleepStageSerializable(
+    val startTime: String,
+    val endTime: String,
+    val stage: Int
+)
+
+@Serializable
+data class SleepSessionRecordSerializable(
+    val startTime: String,
+    val endTime: String,
+    val stages: List<SleepStageSerializable>,
+    val title: String? = null,
+    val notes: String? = null,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<SleepSessionRecordSerializable> {
+            return classRecords.filterIsInstance<SleepSessionRecord>().map { record ->
+                SleepSessionRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    stages = record.stages.map {
+                        SleepStageSerializable(
+                            startTime = it.startTime.toIsoString(),
+                            endTime = it.endTime.toIsoString(),
+                            stage = it.stage
+                        )
+                    },
+                    title = record.title,
+                    notes = record.notes,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+// --- Bone Mass Record ---
+@Serializable
+data class BoneMassRecordSerializable(
+    val time: String,
+    val massInKilograms: Double,
+    val metadata: HealthConnectRecordMetadata
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<BoneMassRecordSerializable> {
+            return classRecords.filterIsInstance<BoneMassRecord>().map { record ->
+                BoneMassRecordSerializable(
+                    time = record.time.toIsoString(),
+                    massInKilograms = record.mass.inKilograms,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
+
+
 // Helper to format Instant to ISO 8601 String
 fun Instant.toIsoString(): String {
     return this.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
