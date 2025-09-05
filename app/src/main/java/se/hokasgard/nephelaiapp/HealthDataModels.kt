@@ -4,6 +4,10 @@ import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.BoneMassRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ExerciseLap
+import androidx.health.connect.client.records.ExerciseRoute
+import androidx.health.connect.client.records.ExerciseRouteResult
+import androidx.health.connect.client.records.ExerciseSegment
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
@@ -73,14 +77,45 @@ data class WeightRecordSerializable(
     val time: String,
     val weight: WeightUnitOutput,
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<WeightRecordSerializable> {
+            return classRecords.filterIsInstance<WeightRecord>().map { record ->
+                WeightRecordSerializable(
+                    time = record.time.toIsoString(),
+                    weight = WeightUnitOutput(
+                        inKilograms = record.weight.inKilograms,
+                        inGrams = record.weight.inGrams,
+                        inMilligrams = record.weight.inMilligrams,
+                        inMicrograms = record.weight.inMicrograms,
+                        inPounds = record.weight.inPounds,
+                        inOunces = record.weight.inOunces
+                    ),
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 @Serializable
 data class HrvRecordSerializable(
     val time: String,
     val heartRateVariability: Double, // Renamed from heartRateVariabilityMillis
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<HrvRecordSerializable> {
+            return classRecords.filterIsInstance<HeartRateVariabilityRmssdRecord>().map { record ->
+                HrvRecordSerializable(
+                    time = record.time.toIsoString(),
+                    heartRateVariability = record.heartRateVariabilityMillis,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 @Serializable
 data class StepsRecordSerializable(
@@ -88,7 +123,20 @@ data class StepsRecordSerializable(
     val startTime: String,
     val endTime: String,
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<StepsRecordSerializable> {
+            return classRecords.filterIsInstance<StepsRecord>().map { record ->
+                StepsRecordSerializable(
+                    count = record.count,
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 @Serializable
 data class HeartRateSampleSerializable(
@@ -102,7 +150,22 @@ data class HeartRateRecordSerializable(
     val endTime: String,
     val samples: List<HeartRateSampleSerializable>,
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<HeartRateRecordSerializable> {
+            return classRecords.filterIsInstance<HeartRateRecord>().map { record ->
+                HeartRateRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    samples = record.samples.map {
+                        HeartRateSampleSerializable(time = it.time.toIsoString(), beatsPerMinute = it.beatsPerMinute)
+                    },
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 // -- Exercise Session Data Classes --
 @Serializable
@@ -145,7 +208,54 @@ data class ExerciseSessionRecordSerializable(
     val laps: List<ExerciseLapSerializable>? = null,
     val route: ExerciseRouteSerializable? = null,
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<ExerciseSessionRecordSerializable> {
+            return classRecords.filterIsInstance<ExerciseSessionRecord>().map { record: ExerciseSessionRecord ->
+                ExerciseSessionRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    exerciseType = record.exerciseType,
+                    title = record.title,
+                    notes = record.notes,
+                    segments = record.segments.map { segment: ExerciseSegment ->
+                        ExerciseSegmentSerializable(
+                            startTime = segment.startTime.toIsoString(),
+                            endTime = segment.endTime.toIsoString(),
+                            segmentType = segment.segmentType
+                        )
+                    }.takeIf { it.isNotEmpty() },
+                    laps = record.laps.map { lap: ExerciseLap ->
+                        ExerciseLapSerializable(
+                            startTime = lap.startTime.toIsoString(),
+                            endTime = lap.endTime.toIsoString(),
+                            lengthInMeters = lap.length?.inMeters
+                        )
+                    }.takeIf { it.isNotEmpty() },
+                    route = if (record.exerciseRouteResult is ExerciseRouteResult.Data) {
+                        (record.exerciseRouteResult as ExerciseRouteResult.Data).exerciseRoute?.let { sdkExerciseRoute: ExerciseRoute ->
+                            ExerciseRouteSerializable(
+                                route = sdkExerciseRoute.route.map { sdkLocation: ExerciseRoute.Location ->
+                                    ExerciseRouteLocationSerializable(
+                                        time = sdkLocation.time.toIsoString(),
+                                        latitude = sdkLocation.latitude,
+                                        longitude = sdkLocation.longitude,
+                                        horizontalAccuracyInMeters = sdkLocation.horizontalAccuracy?.inMeters,
+                                        verticalAccuracyInMeters = sdkLocation.verticalAccuracy?.inMeters,
+                                        altitudeInMeters = sdkLocation.altitude?.inMeters
+                                    )
+                                }
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 // --- Distance Record --- 
 @Serializable
@@ -154,7 +264,20 @@ data class DistanceRecordSerializable(
     val endTime: String,
     val distanceInMeters: Double?,
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<DistanceRecordSerializable> {
+            return classRecords.filterIsInstance<DistanceRecord>().map { record ->
+                DistanceRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    distanceInMeters = record.distance.inMeters,
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 // --- Speed Record ---
 @Serializable
@@ -169,7 +292,25 @@ data class SpeedRecordSerializable(
     val endTime: String,
     val samples: List<SpeedSampleSerializable>,
     val metadata: HealthConnectRecordMetadata
-)
+) {
+    companion object {
+        fun fromRecordsList(classRecords: List<Record>): List<SpeedRecordSerializable> {
+            return classRecords.filterIsInstance<SpeedRecord>().map { record ->
+                SpeedRecordSerializable(
+                    startTime = record.startTime.toIsoString(),
+                    endTime = record.endTime.toIsoString(),
+                    samples = record.samples.map {
+                        SpeedSampleSerializable(
+                            time = it.time.toIsoString(),
+                            speedInMetersPerSecond = it.speed.inMetersPerSecond
+                        )
+                    },
+                    metadata = record.metadata.toSerializable()
+                )
+            }
+        }
+    }
+}
 
 // Helper to format Instant to ISO 8601 String
 fun Instant.toIsoString(): String {

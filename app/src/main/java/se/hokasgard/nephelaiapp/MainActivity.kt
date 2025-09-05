@@ -47,9 +47,32 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json // Ktor json plugin
 import kotlinx.coroutines.CancellationException // Import CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.serialization.KSerializer
 import se.hokasgard.nephelaiapp.ui.theme.NephelaiAppTheme
 import java.time.Instant
 import java.time.ZonedDateTime
+
+// Helper function to handle posting data - moved to top-level
+private suspend inline fun <reified T : Any> handlePostData(
+    dataList: List<T>,
+    itemSerializer: KSerializer<T>,
+    apiUrl: String,
+    recordTypeSimpleName: String,
+    httpClient: HttpClient // Added httpClient parameter
+) {
+    if (dataList.isEmpty()) return
+
+    val postData = PostWrapper(dataList)
+    Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(itemSerializer), postData)}")
+
+    httpClient.post(apiUrl) {
+        contentType(ContentType.Application.Json)
+        headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+        setBody(postData)
+    }.also {
+        Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,7 +100,6 @@ fun HealthConnectScreen() {
 
     val scope = rememberCoroutineScope()
 
-    // allRecordTypes is now defined in HealthDataModels.kt in the same package
     val permissions = allRecordTypes.map {
         HealthPermission.getReadPermission(it)
     }.toSet()
@@ -85,7 +107,6 @@ fun HealthConnectScreen() {
     val ktorHttpClient = remember {
         HttpClient(Android) {
             install(ContentNegotiation) {
-                // appJson is now defined in HealthDataModels.kt in the same package
                 json(appJson)
             }
         }
@@ -120,7 +141,6 @@ fun HealthConnectScreen() {
             val now = Instant.now()
             val allFetchedRecords = mutableListOf<Record>()
 
-            // allRecordTypes is used here
             for (recordType in allRecordTypes) {
                 try {
                     val request = ReadRecordsRequest(
@@ -131,12 +151,11 @@ fun HealthConnectScreen() {
                     val response = healthConnectClient.readRecords(request)
                     allFetchedRecords.addAll(response.records)
                     Log.d("HealthConnect", "${recordType.simpleName} records read: ${response.records.size}")
-                } catch (e: CancellationException) { // Catch specific CancellationException
+                } catch (e: CancellationException) {
                     Log.w("HealthConnect", "Reading ${recordType.simpleName} was cancelled. This might be due to scope leaving composition.", e)
-                    throw e // Re-throw CancellationException
+                    throw e 
                 } catch (e: Exception) {
                     Log.e("HealthConnect", "Error reading ${recordType.simpleName} records (non-cancellation)", e)
-                    // Consider if you want to continue reading other record types or stop altogether
                 }
             }
             healthRecords = allFetchedRecords.sortedByDescending { it.metadata.lastModifiedTime }
@@ -165,201 +184,34 @@ fun HealthConnectScreen() {
             Log.d("SendData", "Processing ${classRecords.size} records of type $recordTypeSimpleName for $apiUrl")
 
             try {
-                // Serializable classes (HrvRecordSerializable, etc.) and helper functions
-                // (toSerializable, toIsoString) are now in HealthDataModels.kt
                 when (recordClass) {
                     HeartRateVariabilityRmssdRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<HeartRateVariabilityRmssdRecord>().map { record ->
-                            HrvRecordSerializable(
-                                time = record.time.toIsoString(),
-                                heartRateVariability = record.heartRateVariabilityMillis,
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(HrvRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = HrvRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, HrvRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     WeightRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<WeightRecord>().map { record ->
-                            WeightRecordSerializable(
-                                time = record.time.toIsoString(),
-                                weight = WeightUnitOutput(
-                                    inKilograms = record.weight.inKilograms,
-                                    inGrams = record.weight.inGrams,
-                                    inMilligrams = record.weight.inMilligrams, 
-                                    inMicrograms = record.weight.inMicrograms, 
-                                    inPounds = record.weight.inPounds,
-                                    inOunces = record.weight.inOunces
-                                ),
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(WeightRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = WeightRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, WeightRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     StepsRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<StepsRecord>().map { record ->
-                            StepsRecordSerializable(
-                                count = record.count,
-                                startTime = record.startTime.toIsoString(),
-                                endTime = record.endTime.toIsoString(),
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(StepsRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = StepsRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, StepsRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     HeartRateRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<HeartRateRecord>().map { record ->
-                            HeartRateRecordSerializable(
-                                startTime = record.startTime.toIsoString(),
-                                endTime = record.endTime.toIsoString(),
-                                samples = record.samples.map {
-                                    HeartRateSampleSerializable(time = it.time.toIsoString(), beatsPerMinute = it.beatsPerMinute)
-                                },
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(HeartRateRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = HeartRateRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, HeartRateRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     ExerciseSessionRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<ExerciseSessionRecord>().map { record ->
-                            ExerciseSessionRecordSerializable(
-                                startTime = record.startTime.toIsoString(),
-                                endTime = record.endTime.toIsoString(),
-                                exerciseType = record.exerciseType,
-                                title = record.title,
-                                notes = record.notes,
-                                segments = record.segments.map {
-                                    ExerciseSegmentSerializable(
-                                        startTime = it.startTime.toIsoString(),
-                                        endTime = it.endTime.toIsoString(),
-                                        segmentType = it.segmentType
-                                    )
-                                }.takeIf { it.isNotEmpty() },
-                                laps = record.laps.map {
-                                    ExerciseLapSerializable(
-                                        startTime = it.startTime.toIsoString(),
-                                        endTime = it.endTime.toIsoString(),
-                                        lengthInMeters = it.length?.inMeters
-                                    )
-                                }.takeIf { it.isNotEmpty() },
-                                route = if (record.exerciseRouteResult is ExerciseRouteResult.Data) {
-                                    (record.exerciseRouteResult as ExerciseRouteResult.Data).exerciseRoute?.let { sdkExerciseRoute: ExerciseRoute ->
-                                        ExerciseRouteSerializable(
-                                            route = sdkExerciseRoute.route.map { sdkLocation: ExerciseRoute.Location -> // Explicit type for sdkLocation
-                                                ExerciseRouteLocationSerializable(
-                                                    time = sdkLocation.time.toIsoString(),
-                                                    latitude = sdkLocation.latitude,
-                                                    longitude = sdkLocation.longitude,
-                                                    horizontalAccuracyInMeters = sdkLocation.horizontalAccuracy?.inMeters,
-                                                    verticalAccuracyInMeters = sdkLocation.verticalAccuracy?.inMeters,
-                                                    altitudeInMeters = sdkLocation.altitude?.inMeters
-                                                )
-                                            }
-                                        )
-                                    }
-                                } else {
-                                    null
-                                },
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(ExerciseSessionRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = ExerciseSessionRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, ExerciseSessionRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     DistanceRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<DistanceRecord>().map { record ->
-                            DistanceRecordSerializable(
-                                startTime = record.startTime.toIsoString(),
-                                endTime = record.endTime.toIsoString(),
-                                distanceInMeters = record.distance.inMeters,
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(DistanceRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = DistanceRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, DistanceRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     SpeedRecord::class -> {
-                        val serializableData = classRecords.filterIsInstance<SpeedRecord>().map { record ->
-                            SpeedRecordSerializable(
-                                startTime = record.startTime.toIsoString(),
-                                endTime = record.endTime.toIsoString(),
-                                samples = record.samples.map {
-                                    SpeedSampleSerializable(
-                                        time = it.time.toIsoString(),
-                                        speedInMetersPerSecond = it.speed.inMetersPerSecond
-                                    )
-                                },
-                                metadata = record.metadata.toSerializable()
-                            )
-                        }
-                        if (serializableData.isNotEmpty()) {
-                            val postData = PostWrapper(serializableData)
-                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(SpeedRecordSerializable.serializer()), postData)}")
-                            ktorHttpClient.post(apiUrl) {
-                                contentType(ContentType.Application.Json)
-                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
-                                setBody(postData)
-                            }.also {
-                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
-                            }
-                        }
+                        val serializableData = SpeedRecordSerializable.fromRecordsList(classRecords)
+                        handlePostData(serializableData, SpeedRecordSerializable.serializer(), apiUrl, recordTypeSimpleName, ktorHttpClient)
                     }
                     else -> {
                         Log.w("SendData", "No specific serialization (aligned with react-native-health-connect) implemented for $recordTypeSimpleName. Skipping.")
@@ -417,7 +269,6 @@ fun HealthConnectScreen() {
             Text("Found ${healthRecords.size} Health Records (last 7 days):")
             LazyColumn {
                 items(healthRecords) { record ->
-                    // toIsoString() is now in HealthDataModels.kt
                     when (record) {
                         is HeartRateVariabilityRmssdRecord -> {
                             Text("HRV: ${record.heartRateVariabilityMillis} ms at ${record.time.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
