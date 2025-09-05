@@ -2,6 +2,14 @@ import java.util.Properties
 import java.io.FileInputStream
 import java.io.File // Assuming this was added to fix the previous 'Unresolved reference: io'
 
+configurations.all {
+    resolutionStrategy {
+        force("org.jetbrains.kotlin:kotlin-stdlib:1.9.0") // Example version
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0") // If you use jdk8 variant
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0") // If you use jdk7 variant
+    }
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -69,6 +77,8 @@ android {
 }
 
 dependencies {
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.0")) // Example version, use your project's Kotlin version
+    implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

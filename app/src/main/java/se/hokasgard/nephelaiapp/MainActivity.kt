@@ -31,71 +31,25 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
-import androidx.health.connect.client.records.metadata.Device
+import androidx.health.connect.client.records.* // Covers all specific Record types used in HealthConnectScreen
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.android.Android
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.headers // Required for headers
+import io.ktor.client.request.headers
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders // Required for HttpHeaders
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
-import io.ktor.serialization.kotlinx.json.json
+import io.ktor.serialization.kotlinx.json.json // Ktor json plugin
+import kotlinx.coroutines.CancellationException // Import CancellationException
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import se.hokasgard.nephelaiapp.ui.theme.NephelaiAppTheme
 import java.time.Instant
-import java.time.ZoneOffset
 import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-
-// Shared Json configuration
-private val appJson = Json {
-    prettyPrint = true
-    isLenient = true
-    ignoreUnknownKeys = true
-    encodeDefaults = true
-}
-
-// Data classes for JSON serialization
-@Serializable
-data class DeviceSerializable(
-    val manufacturer: String?,
-    val model: String?,
-    val type: Int
-)
-
-@Serializable
-data class HealthConnectRecordMetadata(
-    val id: String,
-    val dataOrigin: String, // package name
-    val lastModifiedTime: String, // ISO 8601 string
-    val clientRecordId: String?,
-    val clientRecordVersion: Long,
-    val device: DeviceSerializable?,
-    val recordingMethod: Int
-)
-
-@Serializable
-data class HrvRecordSerializable(
-    val metadata: HealthConnectRecordMetadata,
-    val time: String, // ISO 8601 string for record time
-    val heartRateVariabilityMillis: Double
-)
-
-@Serializable
-data class HrvPostData(val data: List<HrvRecordSerializable>)
-
-// Helper to format Instant to ISO 8601 String
-fun Instant.toIsoString(): String {
-    return this.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,19 +72,21 @@ fun HealthConnectScreen() {
     val context = LocalContext.current
     val healthConnectClient = remember { HealthConnectClient.getOrCreate(context) }
     var hasPermissions by remember { mutableStateOf(false) }
-    var hrvRecords by remember { mutableStateOf<List<HeartRateVariabilityRmssdRecord>>(emptyList()) }
+    var healthRecords by remember { mutableStateOf<List<Record>>(emptyList()) }
     var isSending by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
-    val permissions = setOf(
-        HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)
-    )
+    // allRecordTypes is now defined in HealthDataModels.kt in the same package
+    val permissions = allRecordTypes.map {
+        HealthPermission.getReadPermission(it)
+    }.toSet()
 
     val ktorHttpClient = remember {
         HttpClient(Android) {
             install(ContentNegotiation) {
-                json(appJson) // Use the shared appJson instance
+                // appJson is now defined in HealthDataModels.kt in the same package
+                json(appJson)
             }
         }
     }
@@ -158,81 +114,262 @@ fun HealthConnectScreen() {
         }
     }
 
-    suspend fun readHrvRecords() {
+    suspend fun readAllHealthData() {
         if (hasPermissions) {
-            try {
-                val sevenDaysAgo = ZonedDateTime.now().minusDays(7).toInstant()
-                val now = Instant.now()
-                val request = ReadRecordsRequest(
-                    recordType = HeartRateVariabilityRmssdRecord::class,
-                    timeRangeFilter = TimeRangeFilter.between(sevenDaysAgo, now),
-                    ascendingOrder = false
-                )
-                val response = healthConnectClient.readRecords(request)
-                hrvRecords = response.records
-                Log.d("HealthConnect", "HRV records read: ${hrvRecords.size}")
-            } catch (e: Exception) {
-                Log.e("HealthConnect", "Error reading HRV records", e)
+            val sevenDaysAgo = ZonedDateTime.now().minusDays(7).toInstant()
+            val now = Instant.now()
+            val allFetchedRecords = mutableListOf<Record>()
+
+            // allRecordTypes is used here
+            for (recordType in allRecordTypes) {
+                try {
+                    val request = ReadRecordsRequest(
+                        recordType = recordType,
+                        timeRangeFilter = TimeRangeFilter.between(sevenDaysAgo, now),
+                        ascendingOrder = false
+                    )
+                    val response = healthConnectClient.readRecords(request)
+                    allFetchedRecords.addAll(response.records)
+                    Log.d("HealthConnect", "${recordType.simpleName} records read: ${response.records.size}")
+                } catch (e: CancellationException) { // Catch specific CancellationException
+                    Log.w("HealthConnect", "Reading ${recordType.simpleName} was cancelled. This might be due to scope leaving composition.", e)
+                    throw e // Re-throw CancellationException
+                } catch (e: Exception) {
+                    Log.e("HealthConnect", "Error reading ${recordType.simpleName} records (non-cancellation)", e)
+                    // Consider if you want to continue reading other record types or stop altogether
+                }
             }
+            healthRecords = allFetchedRecords.sortedByDescending { it.metadata.lastModifiedTime }
+            Log.d("HealthConnect", "Total records read: ${healthRecords.size}")
         }
     }
 
-    suspend fun sendHrvDataToServer(records: List<HeartRateVariabilityRmssdRecord>) {
+    suspend fun sendAllHealthDataToServer(records: List<Record>) {
         if (records.isEmpty()) {
             Log.d("SendData", "No records to send.")
             return
         }
         if (BuildConfig.NEPHELIAI_API_TOKEN.isEmpty()) {
             Log.e("SendData", "API token is missing. Please check local.properties.")
-            isSending = false
             return
         }
+
         isSending = true
-        val serializableRecords = records.map { record ->
-            val hcMetadata = record.metadata
-            val serializableMetadata = HealthConnectRecordMetadata(
-                id = hcMetadata.id,
-                dataOrigin = hcMetadata.dataOrigin.packageName,
-                lastModifiedTime = hcMetadata.lastModifiedTime.toIsoString(),
-                clientRecordId = hcMetadata.clientRecordId,
-                clientRecordVersion = hcMetadata.clientRecordVersion,
-                device = hcMetadata.device?.let {
-                    DeviceSerializable(
-                        manufacturer = it.manufacturer,
-                        model = it.model,
-                        type = it.type
-                    )
-                },
-                recordingMethod = hcMetadata.recordingMethod
-            )
+        val groupedRecords = records.groupBy { it::class }
 
-            HrvRecordSerializable(
-                metadata = serializableMetadata,
-                time = record.time.toIsoString(),
-                heartRateVariabilityMillis = record.heartRateVariabilityMillis
-            )
-        }
-        val postData = HrvPostData(data = serializableRecords)
+        for ((recordClass, classRecords) in groupedRecords) {
+            if (classRecords.isEmpty()) continue
 
-        val apiUrl = "http://valhall/api/v2/sync/HeartRateVariabilityRmssdRecord"
-        Log.d("SendData", "Preparing to send ${postData.data.size} records to $apiUrl")
+            val recordTypeSimpleName = recordClass.simpleName ?: "UnknownRecordType"
+            val apiUrl = "http://valhall/api/v2/sync/$recordTypeSimpleName"
+            Log.d("SendData", "Processing ${classRecords.size} records of type $recordTypeSimpleName for $apiUrl")
 
-        Log.d("SendData", "JSON Body: ${appJson.encodeToString(HrvPostData.serializer(), postData)}")
-
-        try {
-            val response = ktorHttpClient.post(apiUrl) {
-                contentType(ContentType.Application.Json)
-                headers {
-                    append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}")
+            try {
+                // Serializable classes (HrvRecordSerializable, etc.) and helper functions
+                // (toSerializable, toIsoString) are now in HealthDataModels.kt
+                when (recordClass) {
+                    HeartRateVariabilityRmssdRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<HeartRateVariabilityRmssdRecord>().map { record ->
+                            HrvRecordSerializable(
+                                time = record.time.toIsoString(),
+                                heartRateVariability = record.heartRateVariabilityMillis,
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(HrvRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    WeightRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<WeightRecord>().map { record ->
+                            WeightRecordSerializable(
+                                time = record.time.toIsoString(),
+                                weight = WeightUnitOutput(
+                                    inKilograms = record.weight.inKilograms,
+                                    inGrams = record.weight.inGrams,
+                                    inMilligrams = record.weight.inMilligrams, 
+                                    inMicrograms = record.weight.inMicrograms, 
+                                    inPounds = record.weight.inPounds,
+                                    inOunces = record.weight.inOunces
+                                ),
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(WeightRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    StepsRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<StepsRecord>().map { record ->
+                            StepsRecordSerializable(
+                                count = record.count,
+                                startTime = record.startTime.toIsoString(),
+                                endTime = record.endTime.toIsoString(),
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(StepsRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    HeartRateRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<HeartRateRecord>().map { record ->
+                            HeartRateRecordSerializable(
+                                startTime = record.startTime.toIsoString(),
+                                endTime = record.endTime.toIsoString(),
+                                samples = record.samples.map {
+                                    HeartRateSampleSerializable(time = it.time.toIsoString(), beatsPerMinute = it.beatsPerMinute)
+                                },
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(HeartRateRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    ExerciseSessionRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<ExerciseSessionRecord>().map { record ->
+                            ExerciseSessionRecordSerializable(
+                                startTime = record.startTime.toIsoString(),
+                                endTime = record.endTime.toIsoString(),
+                                exerciseType = record.exerciseType,
+                                title = record.title,
+                                notes = record.notes,
+                                segments = record.segments.map {
+                                    ExerciseSegmentSerializable(
+                                        startTime = it.startTime.toIsoString(),
+                                        endTime = it.endTime.toIsoString(),
+                                        segmentType = it.segmentType
+                                    )
+                                }.takeIf { it.isNotEmpty() },
+                                laps = record.laps.map {
+                                    ExerciseLapSerializable(
+                                        startTime = it.startTime.toIsoString(),
+                                        endTime = it.endTime.toIsoString(),
+                                        lengthInMeters = it.length?.inMeters
+                                    )
+                                }.takeIf { it.isNotEmpty() },
+                                route = if (record.exerciseRouteResult is ExerciseRouteResult.Data) {
+                                    (record.exerciseRouteResult as ExerciseRouteResult.Data).exerciseRoute?.let { sdkExerciseRoute: ExerciseRoute ->
+                                        ExerciseRouteSerializable(
+                                            route = sdkExerciseRoute.route.map { sdkLocation: ExerciseRoute.Location -> // Explicit type for sdkLocation
+                                                ExerciseRouteLocationSerializable(
+                                                    time = sdkLocation.time.toIsoString(),
+                                                    latitude = sdkLocation.latitude,
+                                                    longitude = sdkLocation.longitude,
+                                                    horizontalAccuracyInMeters = sdkLocation.horizontalAccuracy?.inMeters,
+                                                    verticalAccuracyInMeters = sdkLocation.verticalAccuracy?.inMeters,
+                                                    altitudeInMeters = sdkLocation.altitude?.inMeters
+                                                )
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(ExerciseSessionRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    DistanceRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<DistanceRecord>().map { record ->
+                            DistanceRecordSerializable(
+                                startTime = record.startTime.toIsoString(),
+                                endTime = record.endTime.toIsoString(),
+                                distanceInMeters = record.distance.inMeters,
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(DistanceRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    SpeedRecord::class -> {
+                        val serializableData = classRecords.filterIsInstance<SpeedRecord>().map { record ->
+                            SpeedRecordSerializable(
+                                startTime = record.startTime.toIsoString(),
+                                endTime = record.endTime.toIsoString(),
+                                samples = record.samples.map {
+                                    SpeedSampleSerializable(
+                                        time = it.time.toIsoString(),
+                                        speedInMetersPerSecond = it.speed.inMetersPerSecond
+                                    )
+                                },
+                                metadata = record.metadata.toSerializable()
+                            )
+                        }
+                        if (serializableData.isNotEmpty()) {
+                            val postData = PostWrapper(serializableData)
+                            Log.d("SendData", "JSON Body for $recordTypeSimpleName: ${appJson.encodeToString(PostWrapper.serializer(SpeedRecordSerializable.serializer()), postData)}")
+                            ktorHttpClient.post(apiUrl) {
+                                contentType(ContentType.Application.Json)
+                                headers { append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NEPHELIAI_API_TOKEN}") }
+                                setBody(postData)
+                            }.also {
+                                Log.d("SendData", "$recordTypeSimpleName Server response: ${it.status} - ${it.bodyAsText()}")
+                            }
+                        }
+                    }
+                    else -> {
+                        Log.w("SendData", "No specific serialization (aligned with react-native-health-connect) implemented for $recordTypeSimpleName. Skipping.")
+                    }
                 }
-                setBody(postData)
+            } catch (e: Exception) {
+                Log.e("SendData", "Error sending $recordTypeSimpleName data", e)
             }
-            Log.d("SendData", "Server response: ${response.status} - ${response.bodyAsText()}")
-        } catch (e: Exception) {
-            Log.e("SendData", "Error sending HRV data", e)
-        } finally {
-            isSending = false
         }
+        isSending = false
     }
 
     LaunchedEffect(Unit) {
@@ -241,7 +378,7 @@ fun HealthConnectScreen() {
 
     LaunchedEffect(hasPermissions) {
         if (hasPermissions) {
-            readHrvRecords()
+            readAllHealthData()
         }
     }
 
@@ -253,7 +390,7 @@ fun HealthConnectScreen() {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            if (hasPermissions) "✅ Permissions Granted for HRV" else "❌ Permissions Not Granted for HRV"
+            if (hasPermissions) "✅ Permissions Granted for Health Data" else "❌ Permissions Not Granted for Health Data"
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
@@ -261,30 +398,56 @@ fun HealthConnectScreen() {
                     scope.launch {
                         checkAndRequestPermissions()
                         if (hasPermissions) {
-                            readHrvRecords()
+                            readAllHealthData()
                         }
                     }
                 }
             ) {
-                Text(if (hasPermissions) "Refresh HRV Data" else "Check Permissions")
+                Text(if (hasPermissions) "Refresh Health Data" else "Check Permissions")
             }
             Button(
-                onClick = { scope.launch { sendHrvDataToServer(hrvRecords) } },
-                enabled = hrvRecords.isNotEmpty() && !isSending
+                onClick = { scope.launch { sendAllHealthDataToServer(healthRecords) } },
+                enabled = healthRecords.isNotEmpty() && !isSending
             ) {
-                Text(if (isSending) "Sending..." else "Send to API")
+                Text(if (isSending) "Sending..." else "Send All Data to API")
             }
         }
 
-        if (hrvRecords.isNotEmpty()) {
-            Text("Latest HRV Records (last 7 days):")
+        if (healthRecords.isNotEmpty()) {
+            Text("Found ${healthRecords.size} Health Records (last 7 days):")
             LazyColumn {
-                items(hrvRecords) { record ->
-                    Text("Time: ${record.time.toIsoString()}, HRV: ${record.heartRateVariabilityMillis} ms, ID: ${record.metadata.id}")
+                items(healthRecords) { record ->
+                    // toIsoString() is now in HealthDataModels.kt
+                    when (record) {
+                        is HeartRateVariabilityRmssdRecord -> {
+                            Text("HRV: ${record.heartRateVariabilityMillis} ms at ${record.time.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is WeightRecord -> {
+                            Text("Weight: ${record.weight.inKilograms} kg at ${record.time.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is StepsRecord -> {
+                             Text("Steps: ${record.count} from ${record.startTime.toIsoString()} to ${record.endTime.toIsoString()}, ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is ExerciseSessionRecord -> {
+                            Text("Exercise: ${record.title ?: record.exerciseType.toString().lowercase().replaceFirstChar { it.uppercase() }} (${record.startTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is DistanceRecord -> {
+                            Text("Distance: ${String.format("%.2f", record.distance.inMeters)}m (${record.startTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is SpeedRecord -> {
+                             Text("Speed: First sample ${String.format("%.2f", record.samples.firstOrNull()?.speed?.inMetersPerSecond ?: 0.0)} m/s (${record.startTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        is HeartRateRecord -> {
+                             Text("HeartRate: ${record.samples.size} samples, first ${record.samples.firstOrNull()?.beatsPerMinute ?: "N/A"}bpm (${record.startTime.toIsoString()}), ID: ${record.metadata.id.substring(0,8)}")
+                        }
+                        else -> {
+                            Text("${record::class.simpleName}: ID: ${record.metadata.id.substring(0,8)} at ${record.metadata.lastModifiedTime.toIsoString()}")
+                        }
+                    }
                 }
             }
         } else if (hasPermissions) {
-            Text("No HRV records found for the last 7 days.")
+            Text("No health records found for the last 7 days.")
         }
     }
 }
