@@ -65,6 +65,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.KSerializer
 import se.hokasgard.nephelaiapp.ui.theme.NephelaiAppTheme
+// Import allRecordTypes from HealthDataModels
+import se.hokasgard.nephelaiapp.allRecordTypes
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -93,6 +95,28 @@ fun Record.getPrimaryInstant(): Instant {
         is BoneMassRecord -> this.time
         is ExerciseSessionRecord -> this.startTime
         is HeartRateRecord -> this.startTime
+        is HeightRecord -> this.time
+        is BodyWaterMassRecord -> this.time
+        is BasalMetabolicRateRecord -> this.time
+        is CervicalMucusRecord -> this.time
+        is IntermenstrualBleedingRecord -> this.time
+        is MenstruationFlowRecord -> this.time
+        is MenstruationPeriodRecord -> this.startTime 
+        is OvulationTestRecord -> this.time
+        is SexualActivityRecord -> this.time
+        is BasalBodyTemperatureRecord -> this.time
+        is HydrationRecord -> this.startTime 
+        is RestingHeartRateRecord -> this.time
+        is BloodPressureRecord -> this.time
+        is BloodGlucoseRecord -> this.time
+        is OxygenSaturationRecord -> this.time
+        is BodyTemperatureRecord -> this.time
+        is RespiratoryRateRecord -> this.time
+        is FloorsClimbedRecord -> this.endTime
+        is CyclingPedalingCadenceRecord -> this.endTime
+        is ElevationGainedRecord -> this.endTime
+        is Vo2MaxRecord -> this.time
+        is WheelchairPushesRecord -> this.endTime
         else -> this.metadata.lastModifiedTime
     }
 }
@@ -114,7 +138,7 @@ fun getRecordSummary(record: Record): String {
         is BodyFatRecord -> "Body Fat: ${String.format("%.1f", record.percentage.value)}%%"
         is SleepSessionRecord -> "Sleep: ${record.title ?: "Session"} (Stages: ${record.stages.size})"
         is BoneMassRecord -> "Bone Mass: ${String.format("%.2f", record.mass.inKilograms)} kg"
-        else -> record::class.simpleName ?: "Record"
+        else -> record::class.simpleName ?: "Record" 
     }
 }
 
@@ -180,28 +204,28 @@ fun HealthConnectScreen() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val healthConnectClient = remember { HealthConnectClient.getOrCreate(context) }
     var hasPermissions by remember { mutableStateOf(false) }
-    var healthRecords by remember { mutableStateOf<List<Record>>(emptyList()) }
+    var healthRecords by remember { mutableStateOf<List<Record>>(emptyList()) } 
     var isProcessing by remember { mutableStateOf(false) } 
     var pendingTokenToPersist by remember { mutableStateOf<String?>(null) }
-    var statusMessage by remember { mutableStateOf("Checking permissions...") } // Initial status
+    var statusMessage by remember { mutableStateOf("Checking permissions...") } 
 
     val scope = rememberCoroutineScope()
-    val permissions = allRecordTypes.map { HealthPermission.getReadPermission(it) }.toSet()
+    val permissions = remember(allRecordTypes) { allRecordTypes.map { HealthPermission.getReadPermission(it) }.toSet() }
     val ktorHttpClient = remember { HttpClient(Android) { install(ContentNegotiation) { json(appJson) } } }
 
     suspend fun fetchHealthData(currentActiveContext: Context) {
         if (!hasPermissions) {
             statusMessage = "Permissions not granted. Cannot fetch data."
             Log.d("HealthConnectScreen", "fetchHealthData called but no permissions.")
-            return // isProcessing should be false if we reach here via this path
+            return 
         }
-        if(isProcessing) { // Prevent truly concurrent fetches
+        if(isProcessing) { 
             Log.d("HealthConnectScreen", "fetchHealthData called while already processing (concurrent call). Bailing.")
             return
         }
-        isProcessing = true // Set isProcessing for the duration of this fetch operation
+        isProcessing = true 
         statusMessage = "Fetching data from Health Connect..."
-        Log.d("HealthConnectScreen", "Starting data fetch...")
+        Log.d("HealthConnectScreen", "Starting data fetch for ${allRecordTypes.size} types...")
         val localHealthRecords = mutableListOf<Record>() 
         var localPendingTokenToPersist: String? = null 
         var fetchSuccessful = true
@@ -214,22 +238,30 @@ fun HealthConnectScreen() {
                 val sevenDaysAgo = ZonedDateTime.now().minusDays(7).toInstant()
                 val now = Instant.now()
                 for (recordType: KClass<out Record> in allRecordTypes) {
-                    @Suppress("UNCHECKED_CAST")
-                    val specificRecordType = recordType as KClass<Record>
-                    val request = ReadRecordsRequest(
-                        recordType = specificRecordType,
-                        timeRangeFilter = TimeRangeFilter.between(sevenDaysAgo, now),
-                        ascendingOrder = false
-                    )
-                    localHealthRecords.addAll(healthConnectClient.readRecords(request).records)
+                    try {
+                        @Suppress("UNCHECKED_CAST")
+                        val specificRecordType = recordType as KClass<Record>
+                        val request = ReadRecordsRequest(
+                            recordType = specificRecordType,
+                            timeRangeFilter = TimeRangeFilter.between(sevenDaysAgo, now),
+                            ascendingOrder = false
+                        )
+                        val recordsOfType = healthConnectClient.readRecords(request).records
+                        if(recordsOfType.isNotEmpty()) {
+                            Log.d("FetchData", "Fetched ${recordsOfType.size} records of type ${recordType.simpleName}")
+                            localHealthRecords.addAll(recordsOfType)
+                        }
+                    } catch (e: Exception) {
+                        Log.w("FetchData", "Error fetching ${recordType.simpleName}: ${e.message}. May require specific permissions not yet handled or type not available.")
+                    }
                 }
-                Log.d("FetchData", "Initial fetch complete: ${localHealthRecords.size} records.")
+                Log.d("FetchData", "Initial fetch process complete. Total ${localHealthRecords.size} records fetched.")
                 if (localHealthRecords.isNotEmpty()) {
                     val initialToken = healthConnectClient.getChangesToken(ChangesTokenRequest(allRecordTypes.toSet()))
                     localPendingTokenToPersist = initialToken
                     statusMessage = "Fetched ${localHealthRecords.size} initial records. Ready to send."
                 } else {
-                    statusMessage = "No records found during initial fetch."
+                    statusMessage = "No records found during initial fetch for any type."
                     try {
                         val initialToken = healthConnectClient.getChangesToken(ChangesTokenRequest(allRecordTypes.toSet()))
                         saveChangesToken(currentActiveContext, initialToken) 
@@ -240,7 +272,7 @@ fun HealthConnectScreen() {
                     }
                 }
             } catch (e: Exception) {
-                Log.e("FetchData", "Error fetching initial data from Health Connect.", e)
+                Log.e("FetchData", "Error during overall initial data fetch from Health Connect.", e)
                 statusMessage = "Error fetching initial data: ${e.message}"
                 fetchSuccessful = false
             }
@@ -248,17 +280,21 @@ fun HealthConnectScreen() {
             Log.d("FetchData", "Token found: ${lastTokenFromPrefs.take(10)}... Fetching changes.")
             try {
                 val changesResponse = healthConnectClient.getChanges(lastTokenFromPrefs)
-                changesResponse.changes.mapNotNull { if (it is UpsertionChange) it.record else null }.forEach { localHealthRecords.add(it) }
+                val upsertions = changesResponse.changes.mapNotNull { if (it is UpsertionChange) it.record else null }
+                if (upsertions.isNotEmpty()) {
+                    Log.d("FetchData", "Adding ${upsertions.size} upserted records to list.")
+                    localHealthRecords.addAll(upsertions)
+                }
                 changesResponse.changes.forEach { if (it is DeletionChange) Log.d("HealthConnect", "Record deleted, ID: ${it.recordId}. Deletion handling for server not implemented.") }
                 localPendingTokenToPersist = changesResponse.nextChangesToken
-                Log.d("FetchData", "Fetched ${localHealthRecords.size} upsertions. Next token candidate: ${localPendingTokenToPersist?.take(10)}...")
-                if (localHealthRecords.isEmpty()) {
+                Log.d("FetchData", "Fetched ${upsertions.size} upsertions. Next token candidate: ${localPendingTokenToPersist?.take(10)}...")
+                if (upsertions.isEmpty()) {
                     statusMessage = "No new changes found."
                     saveChangesToken(currentActiveContext, localPendingTokenToPersist) 
                     Log.d("FetchData", "Saved next changes token as no new data was found: ${localPendingTokenToPersist?.take(10)}...")
-                    localPendingTokenToPersist = null
+                    localPendingTokenToPersist = null 
                 } else {
-                    statusMessage = "Fetched ${localHealthRecords.size} new/updated records. Ready to send."
+                    statusMessage = "Fetched ${upsertions.size} new/updated records. Ready to send."
                 }
             } catch (e: Exception) {
                 Log.e("FetchData", "Error fetching changes from Health Connect.", e)
@@ -271,42 +307,45 @@ fun HealthConnectScreen() {
             healthRecords = localHealthRecords.sortedByDescending { it.getPrimaryInstant() }
             pendingTokenToPersist = localPendingTokenToPersist 
         } else {
-            healthRecords = emptyList() 
+            if (lastTokenFromPrefs != null) healthRecords = emptyList() 
             pendingTokenToPersist = null
         }
         Log.d("HealthConnectScreen", "Data fetch processing finished. status: $statusMessage")
-        isProcessing = false // Clear isProcessing at the end of the fetch operation
+        isProcessing = false 
     }
 
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissionsMap ->
-        hasPermissions = permissionsMap.values.all { it }
-        if (hasPermissions) {
+        val allGranted = permissionsMap.values.all { it }
+        hasPermissions = allGranted
+        if (allGranted) {
             Log.d("HealthConnect", "All permissions granted via launcher. Attempting to fetch data.")
-            // isProcessing should be false here, fetchHealthData will handle its own state
             scope.launch { fetchHealthData(context) } 
         } else {
-            Log.d("HealthConnect", "Not all permissions were granted via launcher")
-            statusMessage = "Permissions not granted. Health data cannot be accessed."
-            isProcessing = false // Ensure isProcessing is false if permissions are denied
+            val deniedPermissions = permissionsMap.filter { !it.value }.keys
+            val deniedCount = deniedPermissions.size
+            Log.w("HealthConnect", "Not all permissions were granted via launcher. Denied ($deniedCount): $deniedPermissions")
+            statusMessage = "$deniedCount permission(s) were denied. Health data may be incomplete. Missing: ${deniedPermissions.joinToString()}"
+            isProcessing = false 
         }
     }
 
     suspend fun checkPermissionsAndFetchData(coroutineScope: CoroutineScope, currentContext: Context) {
-        // statusMessage is "Checking permissions..." or whatever it was before this call
-        val granted = healthConnectClient.permissionController.getGrantedPermissions()
-        if (granted.containsAll(permissions)) {
+        val grantedPermissionsSet = healthConnectClient.permissionController.getGrantedPermissions()
+        if (grantedPermissionsSet.containsAll(permissions)) {
             hasPermissions = true
             Log.d("HealthConnect", "Permissions are already granted. Will attempt to fetch data.")
-            // isProcessing is false at this point. fetchHealthData will set it true.
-            // fetchHealthData will also update statusMessage.
             coroutineScope.launch { fetchHealthData(currentContext) }
         } else {
-            hasPermissions = false // Explicitly set if not all granted
-            Log.d("HealthConnect", "Permissions not all granted. Launching permission request.")
-            statusMessage = "Requesting permissions..." // Update status for user
-            isProcessing = false // Ensure isProcessing is false before launching dialog
+            hasPermissions = false
+            val missingPermissions = permissions.subtract(grantedPermissionsSet)
+            Log.w("HealthConnect", "Permissions check failed. App needs ${permissions.size}, granted ${grantedPermissionsSet.size}.")
+            Log.w("HealthConnect", "Expected permissions: ${permissions.joinToString()}")
+            Log.w("HealthConnect", "Granted permissions: ${grantedPermissionsSet.joinToString()}")
+            Log.w("HealthConnect", "Missing permissions (${missingPermissions.size}): ${missingPermissions.joinToString()}")
+            statusMessage = "${missingPermissions.size} permission(s) not granted. Requesting. Missing: ${missingPermissions.joinToString { it.substringAfterLast(".") } }"
+            isProcessing = false 
             requestPermissionLauncher.launch(permissions.toTypedArray())
         }
     }
@@ -322,17 +361,34 @@ fun HealthConnectScreen() {
             Log.d("SendData", "No records to send.")
             return
         }
-        if(isProcessing){ // Prevent concurrent send and fetch
+        if(isProcessing){ 
              Log.d("SendData", "sendPendingDataToServer called while already processing.")
             return
         }
         isProcessing = true
-        statusMessage = "Sending ${healthRecords.size} records to server..."
+        statusMessage = "Sending ${healthRecords.size} records with known serializers to server..."
         var allPostsSuccessful = true
 
-        val recordsToSend = ArrayList(healthRecords) 
+        val recordsWithKnownSerializers = healthRecords.filter {
+            when (it) {
+                is HeartRateVariabilityRmssdRecord, is WeightRecord, is StepsRecord, is HeartRateRecord,
+                is ExerciseSessionRecord, is DistanceRecord, is SpeedRecord, is ActiveCaloriesBurnedRecord,
+                is TotalCaloriesBurnedRecord, is PowerRecord, is NutritionRecord, is LeanBodyMassRecord,
+                is BodyFatRecord, is SleepSessionRecord, is BoneMassRecord -> true
+                else -> false
+            }
+        }
 
-        val groupedRecords = recordsToSend.groupBy { it::class }
+        if (recordsWithKnownSerializers.isEmpty()) {
+            statusMessage = "No records with known serializers to send."
+            Log.d("SendData", "No records with known serializers to send. Other types might be present but not sent.")
+            isProcessing = false
+            return
+        }
+
+        Log.d("SendData", "Attempting to send ${recordsWithKnownSerializers.size} records with known serializers.")
+
+        val groupedRecords = recordsWithKnownSerializers.groupBy { it::class }
         for ((recordClass, classRecords) in groupedRecords) {
             if (classRecords.isEmpty()) continue
             val recordTypeSimpleName = recordClass.simpleName ?: "UnknownRecordType"
@@ -367,16 +423,20 @@ fun HealthConnectScreen() {
         if (allPostsSuccessful) {
             if (pendingTokenToPersist != null) {
                 saveChangesToken(currentActiveContext, pendingTokenToPersist)
-                statusMessage = "Data sent successfully. Token updated."
-                Log.d("SendData", "All posts successful. Saved token: ${pendingTokenToPersist?.take(10)}...")
+                statusMessage = "Known data sent successfully. Token updated."
+                Log.d("SendData", "All posts for known types successful. Saved token: ${pendingTokenToPersist?.take(10)}...")
                 pendingTokenToPersist = null
-            } else {
-                statusMessage = "Data sent successfully, but no new token was pending."
-                 Log.d("SendData", "All posts successful. No new token was pending to save.")
             }
-            healthRecords = emptyList() 
+             else {
+                statusMessage = "Known data sent successfully, but no new token was pending."
+                 Log.d("SendData", "All posts for known types successful. No new token was pending to save.")
+            }
+            healthRecords = healthRecords.filterNot { recordsWithKnownSerializers.contains(it) } 
+            if (healthRecords.isEmpty()) statusMessage += " All pending records cleared."
+            else statusMessage += " Unsupported records remain."
+
         } else {
-            Log.w("SendData", "Not all posts successful. Pending records and their token candidate remain.")
+            Log.w("SendData", "Not all posts for known types successful. Pending records and their token candidate remain.")
         }
         isProcessing = false
     }
@@ -395,10 +455,6 @@ fun HealthConnectScreen() {
                     scope.launch {
                         fetchHealthData(context)
                     }
-                } else if (!hasPermissions){
-                     Log.d("HealthConnectScreen", "App resumed but no permissions.")
-                } else if (isProcessing){
-                     Log.d("HealthConnectScreen", "App resumed but already processing.")
                 }
             }
         }
@@ -408,10 +464,36 @@ fun HealthConnectScreen() {
         }
     }
 
-    val groupedAndSortedRecordsForDisplay by remember(healthRecords) {
+    val supportedRecordsForDisplay by remember(healthRecords) {
+        derivedStateOf {
+            healthRecords.filterNot { record ->
+                val summary = getRecordSummary(record)
+                summary == record::class.simpleName || summary == "Record"
+            }
+        }
+    }
+
+    val unsupportedRecordsSummaryText by remember(healthRecords) {
+        derivedStateOf {
+            val unsupported = healthRecords.filter { record ->
+                val summary = getRecordSummary(record)
+                summary == record::class.simpleName || summary == "Record"
+            }
+            val groupedByType = unsupported.groupBy { it::class }
+            if (groupedByType.isEmpty()) {
+                ""
+            } else {
+                val count = unsupported.size
+                val typesString = groupedByType.keys.mapNotNull { it.simpleName }.distinct().sorted().joinToString(", ")
+                "$count Unsupported Records of types: $typesString"
+            }
+        }
+    }
+
+    val groupedAndSortedSupportedRecordsForDisplay by remember(supportedRecordsForDisplay) {
         derivedStateOf {
             val zoneId = ZoneId.systemDefault()
-            healthRecords
+            supportedRecordsForDisplay
                 .groupBy { record -> LocalDateTime.ofInstant(record.getPrimaryInstant(), zoneId).toLocalDate() }
                 .entries
                 .sortedByDescending { it.key } 
@@ -435,7 +517,7 @@ fun HealthConnectScreen() {
         if (!hasPermissions) {
             Button(
                 onClick = { scope.launch { checkPermissionsAndFetchData(scope, context) } }, 
-                enabled = !isProcessing // isProcessing should be false if we are waiting for permission action
+                enabled = !isProcessing 
             ) {
                 Text("Request Permissions")
             }
@@ -449,19 +531,30 @@ fun HealthConnectScreen() {
                 }
                 Button(
                     onClick = { scope.launch { sendPendingDataToServer(context) } },
-                    enabled = healthRecords.isNotEmpty() && !isProcessing
+                    enabled = healthRecords.any { record -> 
+                        when (record) {
+                            is HeartRateVariabilityRmssdRecord, is WeightRecord, is StepsRecord, is HeartRateRecord,
+                            is ExerciseSessionRecord, is DistanceRecord, is SpeedRecord, is ActiveCaloriesBurnedRecord,
+                            is TotalCaloriesBurnedRecord, is PowerRecord, is NutritionRecord, is LeanBodyMassRecord,
+                            is BodyFatRecord, is SleepSessionRecord, is BoneMassRecord -> true
+                            else -> false
+                        }
+                    } && !isProcessing
                 ) {
                     Text("Send Pending Data")
                 }
             }
         }
 
-        Text("Total pending records: ${healthRecords.size}")
+        Text("Total pending records (all types): ${healthRecords.size}")
+        if (unsupportedRecordsSummaryText.isNotEmpty()) {
+            Text(unsupportedRecordsSummaryText)
+        }
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (groupedAndSortedRecordsForDisplay.isNotEmpty()) {
+        if (groupedAndSortedSupportedRecordsForDisplay.isNotEmpty()) {
             LazyColumn(modifier = Modifier.weight(1f)) {
-                groupedAndSortedRecordsForDisplay.forEach { (date, recordsInGroup) ->
+                groupedAndSortedSupportedRecordsForDisplay.forEach { (date, recordsInGroup) ->
                     item {
                         val dateHeaderText = when (date) {
                             today -> "Today"
@@ -478,7 +571,7 @@ fun HealthConnectScreen() {
                     items(recordsInGroup) { record ->
                         Row(verticalAlignment = Alignment.CenterVertically) { 
                             val recordTime = LocalDateTime.ofInstant(record.getPrimaryInstant(), ZoneId.systemDefault()).format(timeFormatter)
-                            val recordSummary = getRecordSummary(record)
+                            val recordSummaryText = getRecordSummary(record) 
                             Row {
                                 recordTime.forEach { char ->
                                     Text(
@@ -491,15 +584,17 @@ fun HealthConnectScreen() {
                             }
                             Spacer(modifier = Modifier.width(8.dp)) 
                             Text(
-                                text = recordSummary,
+                                text = recordSummaryText,
                                 modifier = Modifier.weight(1f) 
                             )
                         }
                     }
                 }
             }
-        } else if (hasPermissions && !isProcessing) {
-            // Status message already covers cases like "No new changes found" or "No records found"
+        } else if (hasPermissions && !isProcessing && healthRecords.isEmpty()) {
+             Text("No health records found for the selected period.")
+        } else if (hasPermissions && !isProcessing && supportedRecordsForDisplay.isEmpty() && healthRecords.isNotEmpty()){
+             Text("No records with custom display found. Check 'Unsupported Records' summary above.")
         }
     }
 }
